@@ -2,45 +2,72 @@ version: '3.7'
 
 services:
   postgresdb:
+    container_name: database
     image: postgres:latest
+    restart: always
     env_file:
-      - ./backend/.env
-    environment:
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - backend/.env
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - appnet
+
+  adminer:
+    image: adminer
+    container_name: adminer
+    restart: always
+    ports:
+      - 8080:8080
+    networks:
+      - appnet
       
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    container_name: backend
+    command: bash -c "poetry run bash ./prestart.sh && poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
     env_file:
-      - ./backend/.env
-    ports:
-      - "8000:8000"
+      - backend/.env
     depends_on:
       - postgresdb
+    networks:
+      - appnet
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    container_name: frontend
     env_file:
-      - ./frontend/.env
-    ports:
-      - "3000:3000"
-    depends_on:
-      - backend
+      - frontend/.env
+    networks:
+      - appnet
 
-  adminer:
-    image: adminer
-    restart: always
+  # NGINX Proxy Manager Service
+  nginx:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: nginx
+    restart: unless-stopped
     ports:
-      - 8080:8080
+      - "80:80"     # Public HTTP Port
+      - "443:443"   # Public HTTPS Port
+      - "8090:81"     # Admin Web Port for Nginx Proxy Manager
+    volumes:
+      - ./data:/data
+      - ./nginx/nginx.conf:/data/nginx/custom/http_top.conf  # Custom Nginx configuration
+      - ./letsencrypt:/etc/letsencrypt  # Let's Encrypt SSL certificates storage
+    depends_on:
+      - frontend   # Ensure frontend service is started before nginx
+      - backend    # Ensure backend service is started before nginx
+      - adminer    # Ensure adminer service is started before nginx
+    networks:
+      - appnet
 
 volumes:
   postgres_data:
+
+networks:
+  appnet:
